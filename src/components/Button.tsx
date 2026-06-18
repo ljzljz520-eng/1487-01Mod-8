@@ -62,7 +62,4 @@ const Button: Component<ButtonProps> = (props) => {
   );
 };
 
-// 创建 web component
-// defineCustomElement('solid-button', Button);
-
 export default Button;

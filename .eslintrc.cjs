@@ -13,5 +13,16 @@ module.exports = {
     sourceType: 'module',
     ecmaVersion: 2020,
   },
-  rules: {},
+  plugins: ['@typescript-eslint'],
+  rules: {
+    'no-unused-vars': 'off',
+    '@typescript-eslint/no-unused-vars': [
+      'error',
+      {
+        argsIgnorePattern: '^_',
+        varsIgnorePattern: '^_',
+        ignoreRestSiblings: true,
+      },
+    ],
+  },
 };

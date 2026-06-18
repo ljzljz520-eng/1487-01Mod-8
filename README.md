@@ -13,7 +13,11 @@
 
 ## 已实现组件
 
-- **Button** - 按钮组件，支持多种变体和尺寸
+- **Button** - 按钮组件，支持多种变体（primary/secondary/outline/ghost）和尺寸
+- **Dialog** - 弹窗组件，支持遮罩、标题、自定义底部及点击遮罩关闭
+- **Table** - 表格组件，支持列配置、自定义单元格渲染及空状态
+
+每个组件均可作为 SolidJS 组件直接使用，也可通过注册器懒加载为自定义元素（Web Component）。
 
 ## 安装
 
@@ -78,7 +82,9 @@ function App() {
 export default App;
 ```
 
-### 作为 Web Component 使用
+### 作为 Web Component 使用（懒加载注册）
+
+组件库不会在引入时一次性注册全部自定义元素。宿主页面需要通过注册器按需注册，只有被注册的组件才会被加载与定义。
 
 ```html
 <!DOCTYPE html>
@@ -87,17 +93,110 @@ export default App;
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Web Component 示例</title>
-  <!-- 引入组件库 -->
-  <script type="module" src="path/to/solid-web-components-ui.es.js"></script>
+  <script type="module">
+    // 只引入注册 API，未使用的组件不会被加载
+    import { registerAll } from 'solid-web-components-ui';
+
+    // 宿主页面只用到弹窗和表格，就只注册这两个
+    await registerAll(['dialog', 'table']);
+  </script>
 </head>
 <body>
-  <!-- 使用 Web Component -->
-  <solid-button variant="primary" size="medium">
-    Web Component 按钮
-  </solid-button>
+  <solid-dialog open title="提示">这是一条提示</solid-dialog>
+
+  <solid-table
+    columns='[{"key":"name","title":"姓名"},{"key":"age","title":"年龄"}]'
+    data='[{"name":"Alice","age":30},{"name":"Bob","age":25}]'
+  ></solid-table>
 </body>
 </html>
 ```
+
+## 注册器 API
+
+注册器位于 `src/registry`，提供以下能力：
+
+| API | 说明 |
+|-----|------|
+| `register(name)` | 按需加载并注册单个组件为自定义元素（返回 `Promise`） |
+| `registerAll(names)` | 批量注册多个组件 |
+| `isRegistered(name)` | 判断组件是否已注册（自定义元素是否已定义） |
+| `isDefined(name)` | 判断组件是否已在注册表中登记 |
+| `listComponents()` | 列出所有已登记的组件名 |
+| `getStyleDependencies(name?)` | 查询组件的样式依赖（传 `name` 查单个，不传查全部） |
+| `defineComponent(name, def)` | 登记一个组件定义（仅登记懒加载器，不触发导入） |
+
+### 按需导入
+
+组件名与对应标签：`button → <solid-button>`、`dialog → <solid-dialog>`、`table → <solid-table>`。
+
+```ts
+import { register, registerAll, isRegistered } from 'solid-web-components-ui';
+
+// 只注册弹窗和表格：Button 的代码不会被加载，也不会被定义为自定义元素
+await registerAll(['dialog', 'table']);
+
+await register('dialog');           // 重复调用安全：不会二次加载、二次定义
+console.log(isRegistered('button')); // false
+```
+
+注册器内部使用动态 `import()` 加载组件模块，因此只有调用 `register/registerAll` 时对应组件才会被加载；未注册的组件既不执行也不定义自定义元素。
+
+### 重复注册保护
+
+注册器在两层做了去重保护，可安全地多次调用：
+
+1. **登记层**：`defineComponent` 对同名组件只登记一次，重复登记会被忽略。
+2. **注册层**：`register` 在加载前检查 `customElements.get(tagName)` 与内部已注册集合，若已注册则直接返回；并对并发的同一组件注册做 Promise 合并，确保加载器只执行一次。
+
+```ts
+import { register } from 'solid-web-components-ui';
+
+await register('button');
+await register('button');           // 命中保护，不再二次定义
+await Promise.all([                 // 并发调用也只会加载一次
+  register('button'),
+  register('button'),
+]);
+```
+
+### 组件依赖
+
+组件定义中的 `dependencies` 会在注册该组件前自动递归加载并注册其依赖。例如某个复合组件依赖 `button` 时，注册它会先注册 `button`。
+
+## 样式依赖说明
+
+> 重要：避免「只引入脚本后样式缺失」。请按下表确认所需样式。
+
+| 消费方式 | 组件 | 样式依赖 | 是否自包含 |
+|---------|------|---------|-----------|
+| SolidJS 组件（如 `<Button>`） | Button / Dialog / Table | Tailwind CSS | 否，需宿主配置 Tailwind |
+| 自定义元素（如 `<solid-button>`） | Button / Dialog / Table | 无（样式注入到 Shadow DOM） | 是，脚本即可用 |
+
+- **SolidJS 组件**通过 Tailwind 工具类输出样式，宿主项目必须安装并配置 Tailwind CSS（注入 `@tailwind base / components / utilities`），否则会出现无样式的情况。
+- **自定义元素**渲染在 Shadow DOM 中，注册器会把每个组件的样式以 `adoptedStyleSheets`（不支持时回退到 `<style>`）注入到对应的 Shadow Root，因此只需引入脚本即可正常显示，不依赖宿主样式。
+
+可通过 `getStyleDependencies` 在运行时查询样式依赖，便于在 CI 或文档中做校验：
+
+```ts
+import { getStyleDependencies } from 'solid-web-components-ui';
+
+getStyleDependencies('dialog');
+// [{ id: 'tailwind', name: 'Tailwind CSS', required: true, ... }]
+
+getStyleDependencies();
+// { button: [...], dialog: [...], table: [...] }
+```
+
+### 自定义元素属性约定
+
+自定义元素通过属性传参，复杂属性（数组/对象）使用 JSON 字符串：
+
+- `<solid-button variant="primary" size="large" disabled>`
+- `<solid-dialog open title="标题">`
+- `<solid-table columns='[...]' data='[...]'>`（`columns`/`data` 会被解析为 JSON）
+
+布尔属性（如 `disabled`、`open`）除显式写 `="false"` 外均视为 `true`。
 
 ## Docker 部署（详细步骤）
 
@@ -354,9 +453,24 @@ solid-web-components-ui/
 ├── src/
 │   ├── components/         # 组件目录
 │   │   ├── Button.tsx      # 按钮组件
-│   │   └── __tests__/      # 测试文件目录
-│   │       └── Button.test.tsx  # 按钮组件测试
-│   └── index.ts            # 入口文件
+│   │   ├── Dialog.tsx      # 弹窗组件
+│   │   ├── Table.tsx       # 表格组件
+│   │   └── __tests__/      # 组件测试
+│   │       ├── Button.test.tsx
+│   │       ├── Dialog.test.tsx
+│   │       └── Table.test.tsx
+│   ├── registry/           # 自定义元素注册器（懒加载 + 重复注册保护）
+│   │   ├── types.ts        # 类型定义
+│   │   ├── createCustomElement.ts  # Solid → 自定义元素封装 + 样式注入
+│   │   ├── registry.ts     # 注册表核心逻辑
+│   │   ├── manifest.ts     # 组件清单（懒加载器 + 元数据）
+│   │   ├── index.ts        # 注册器导出
+│   │   └── __tests__/      # 注册器测试
+│   │       ├── registry.test.ts
+│   │       └── integration.test.tsx
+│   ├── styles/             # 样式依赖元数据 + Shadow DOM 样式
+│   │   └── index.ts
+│   └── index.ts            # 库入口（导出组件 + 注册器 API）
 ├── .eslintrc.cjs           # ESLint 配置
 ├── Dockerfile              # Docker 构建文件
 ├── docker-compose.yml      # Docker 部署配置
@@ -364,7 +478,7 @@ solid-web-components-ui/
 ├── package.json            # 项目配置和依赖
 ├── tsconfig.json           # TypeScript 配置
 ├── tsconfig.node.json      # Node 环境 TypeScript 配置
-├── vite.config.ts          # Vite 构建配置
+├── vite.config.ts          # Vite 构建配置（含 vitest 测试环境）
 └── README.md               # 项目文档
 ```
 

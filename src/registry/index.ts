@@ -1,8 +1,5 @@
-export { default as Button } from './components/Button';
-export { default as Dialog } from './components/Dialog';
-export { default as Table } from './components/Table';
-
 export {
+  defineComponent,
   register,
   registerAll,
   isRegistered,
@@ -10,14 +7,13 @@ export {
   listComponents,
   getStyleDependencies,
   STYLE_DEPENDENCIES,
-  COMPONENT_TAGS,
 } from './registry';
+
+export { COMPONENT_TAGS } from './manifest';
 
 export type {
   ComponentDefinition,
   ComponentLoader,
   CustomElementOptions,
   StyleDependencyInfo,
-} from './registry';
-
-import './registry/manifest';
+} from './types';
